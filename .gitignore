@@ -1,0 +1,17 @@
+target/
+node_modules/
+dist/
+gateway-service/src/main/resources/static/
+data/cache/
+*.log
+.DS_Store
+.idea/
+*.iml
+.vscode/
+deploy/oci/terraform/.terraform/
+deploy/oci/terraform/*.tfstate*
+deploy/oci/terraform/*.tfvars
+/tmp/
+
+# local port assignments written by start.sh / start.cmd
+.env

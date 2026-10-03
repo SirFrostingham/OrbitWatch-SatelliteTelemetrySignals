@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: orbitwatch
+    folder: OrbitWatch
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

@@ -1,0 +1,28 @@
+#cloud-config
+# Turns a fresh Oracle Linux 9 instance into an OrbitWatch host: Docker + compose, clone, build, run.
+package_update: true
+packages: [git, dnf-utils]
+
+write_files:
+  - path: /etc/orbitwatch.env
+    permissions: "0644"
+    content: |
+      INGEST_SCHEDULE=PT15M
+      INGEST_GP_GROUPS=active
+      %{ if offline == "1" ~}
+      INGEST_GP_REPLAY_FILE=/data/snapshots/celestrak-active-2026-09-09.json
+      INGEST_SATCAT_REPLAY_FILE=/data/snapshots/satcat-2026-09-09.csv
+      %{ endif ~}
+
+runcmd:
+  - dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+  - dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  - systemctl enable --now docker
+  - usermod -aG docker opc
+  # OCI images ship with a restrictive firewall; open the app ports (security list still gates the VCN edge)
+  - firewall-cmd --permanent --add-port=8080/tcp --add-port=8390/tcp --add-port=3000/tcp
+  - firewall-cmd --reload
+  - git clone --depth 1 --branch ${repo_ref} ${repo_url} /opt/orbitwatch
+  - cp /etc/orbitwatch.env /opt/orbitwatch/.env
+  - cd /opt/orbitwatch && docker compose --profile observability up -d --build
+  - echo "OrbitWatch started" > /var/log/orbitwatch-cloud-init.done

@@ -1,0 +1,62 @@
+spring:
+  application:
+    name: analytics-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    streams:
+      application-id: orbitwatch-analytics
+      state-dir: ${KAFKA_STREAMS_STATE_DIR:/tmp/orbitwatch-analytics-state}
+      properties:
+        num.stream.threads: ${STREAMS_THREADS:3}
+        default.key.serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+        default.value.serde: org.apache.kafka.common.serialization.Serdes$ByteArraySerde
+        replication.factor: 1
+    properties:
+      security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+      sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
+      sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
+
+server:
+  port: ${PORT:8083}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+      group:
+        readiness:
+          # container is unhealthy when the Streams client is not running (see StreamsHealthIndicator)
+          include: readinessState,kafkaStreams
+
+orbitwatch:
+  analytics:
+    tick-interval: ${PROPAGATION_TICK_MS:10000}ms
+    window-grace: PT5S
+    conjunction:
+      threshold-km: ${CONJUNCTION_THRESHOLD_KM:10}
+      cell-km: 50
+      critical-km: 1
+      warning-km: 5
+      ignore-below-km: 0.01
+    decay:
+      warning-perigee-km: 250
+      critical-perigee-km: 180
+      bstar-warning: 0.005
+    stale-elements-after: P30D
+    alert-dedupe-ttl: PT30M
+    maneuver:
+      semi-major-axis-km: 1.0
+      inclination-deg: 0.02
+      eccentricity-times-a: 2.0
+      min-separation: PT1H
+
+logging:
+  level:
+    org.apache.kafka: WARN
+    org.apache.kafka.streams: INFO

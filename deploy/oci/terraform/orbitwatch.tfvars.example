@@ -1,0 +1,10 @@
+tenancy_ocid        = "ocid1.tenancy.oc1..aaaa..."
+user_ocid           = "ocid1.user.oc1..aaaa..."
+fingerprint         = "aa:bb:cc:..."
+private_key_path    = "~/.oci/oci_api_key.pem"
+region              = "us-phoenix-1"
+compartment_ocid    = "ocid1.compartment.oc1..aaaa..."
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+admin_cidr          = "203.0.113.7/32"
+dashboard_cidr      = "0.0.0.0/0"
+offline_replay      = false

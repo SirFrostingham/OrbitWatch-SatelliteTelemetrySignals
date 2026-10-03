@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: ingest-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      acks: all
+      compression-type: lz4
+      batch-size: 65536
+      properties:
+        linger.ms: 20
+        enable.idempotence: true
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+    # OCI Streaming / any SASL cluster: set KAFKA_SECURITY_PROTOCOL=SASL_SSL etc. (see deploy/oci)
+    properties:
+      security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+      sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
+      sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
+
+server:
+  port: ${PORT:8081}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+      group:
+        readiness:
+          # a failed ingest run makes the container unhealthy (see IngestHealthIndicator)
+          include: readinessState,ingest
+
+orbitwatch:
+  ingest:
+    schedule: ${INGEST_SCHEDULE:PT15M}
+    cache-dir: ${INGEST_CACHE_DIR:./data/cache}
+    # Committed snapshots, used only when the provider is unreachable and the cache is cold.
+    seed-dir: ${INGEST_SEED_DIR:./data}
+    gp:
+      base-url: https://celestrak.org/NORAD/elements/gp.php
+      groups: ${INGEST_GP_GROUPS:active}
+      min-interval: ${INGEST_GP_MIN_INTERVAL:PT2H}
+      replay-file: ${INGEST_GP_REPLAY_FILE:}
+    satcat:
+      enabled: ${INGEST_SATCAT_ENABLED:true}
+      url: https://celestrak.org/pub/satcat.csv
+      min-interval: PT24H
+      replay-file: ${INGEST_SATCAT_REPLAY_FILE:}
+
+logging:
+  level:
+    org.apache.kafka: WARN

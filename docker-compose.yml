@@ -1,0 +1,162 @@
+# OrbitWatch local stack. `docker compose up --build` then open http://localhost:8080
+#
+#   kafka (KRaft, single node)  <- ingest-service (8081)
+#                               <- propagation-service (8082)
+#                               <- analytics-service (8083, Kafka Streams)
+#                               <- gateway-service (8080, dashboard + REST + GraphQL + SSE)
+#   kafka-ui (8390)             browse topics / lag while demoing
+#   prometheus (9090) + grafana (3000, admin/admin)   --profile observability
+#
+# Offline: INGEST_GP_REPLAY_FILE=/data/snapshots/celestrak-active-2026-09-09.json
+#          INGEST_SATCAT_REPLAY_FILE=/data/snapshots/satcat-2026-09-09.csv
+# If CelesTrak is unreachable from your network, no configuration is needed: ingest seeds from the
+# committed snapshots in ./data and flags the run as degraded (health "degraded", seed_fallbacks metric).
+# Host port already taken? start.sh / start.cmd find free ports and write them to .env before starting.
+# By hand: every published port has an override — GATEWAY_PORT, INGEST_PORT, PROPAGATION_PORT,
+# ANALYTICS_PORT, KAFKA_UI_PORT, KAFKA_HOST_PORT, PROMETHEUS_PORT, GRAFANA_PORT — in a .env file.
+# KAFKA_HOST_PORT changes both the published port and the advertised address, so host clients follow it.
+
+x-service: &service
+  restart: unless-stopped
+  environment: &env
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    # Heap is a percentage of the container's mem_limit (below). Without a limit every JVM sizes itself
+    # against the whole Docker VM and four of them get OOM-killed together (seen 2026-09-10).
+    JAVA_OPTS: -XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError
+  depends_on:
+    kafka:
+      condition: service_healthy
+
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    container_name: ow-kafka
+    mem_limit: 1536m
+    ports:
+      - "${KAFKA_HOST_PORT:-29092}:29092"   # host clients (PLAINTEXT_HOST listener)
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:${KAFKA_HOST_PORT:-29092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 6
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      KAFKA_HEAP_OPTS: -Xmx1g -Xms512m
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:v1.2.0
+    container_name: ow-kafka-ui
+    mem_limit: 512m
+    ports: ["${KAFKA_UI_PORT:-8390}:8080"]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: orbitwatch
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  ingest-service:
+    <<: *service
+    build: { context: ., args: { SERVICE: ingest-service } }
+    image: orbitwatch/ingest-service:local
+    container_name: ow-ingest
+    mem_limit: 768m
+    ports: ["${INGEST_PORT:-8081}:8081"]
+    environment:
+      <<: *env
+      PORT: 8081
+      INGEST_CACHE_DIR: /data/cache
+      INGEST_SCHEDULE: ${INGEST_SCHEDULE:-PT15M}
+      INGEST_GP_GROUPS: ${INGEST_GP_GROUPS:-active}
+      INGEST_SEED_DIR: /data/snapshots
+      INGEST_GP_REPLAY_FILE: ${INGEST_GP_REPLAY_FILE:-}
+      INGEST_SATCAT_REPLAY_FILE: ${INGEST_SATCAT_REPLAY_FILE:-}
+    volumes:
+      - ingest-cache:/data/cache
+      - ./data:/data/snapshots:ro
+
+  propagation-service:
+    <<: *service
+    build: { context: ., args: { SERVICE: propagation-service } }
+    image: orbitwatch/propagation-service:local
+    container_name: ow-propagation
+    mem_limit: 1g
+    ports: ["${PROPAGATION_PORT:-8082}:8082"]
+    environment:
+      <<: *env
+      PORT: 8082
+      PROPAGATION_TICK_MS: ${PROPAGATION_TICK_MS:-10000}
+
+  analytics-service:
+    <<: *service
+    build: { context: ., args: { SERVICE: analytics-service } }
+    image: orbitwatch/analytics-service:local
+    container_name: ow-analytics
+    mem_limit: 1536m
+    ports: ["${ANALYTICS_PORT:-8083}:8083"]
+    environment:
+      <<: *env
+      PORT: 8083
+      PROPAGATION_TICK_MS: ${PROPAGATION_TICK_MS:-10000}
+      KAFKA_STREAMS_STATE_DIR: /data/streams
+      CONJUNCTION_THRESHOLD_KM: ${CONJUNCTION_THRESHOLD_KM:-10}
+    volumes:
+      - analytics-state:/data/streams
+
+  gateway-service:
+    <<: *service
+    build: { context: ., args: { SERVICE: gateway-service } }
+    image: orbitwatch/gateway-service:local
+    container_name: ow-gateway
+    mem_limit: 1g
+    ports: ["${GATEWAY_PORT:-8080}:8080"]
+    environment:
+      <<: *env
+      PORT: 8080
+      PROPAGATION_URL: http://propagation-service:8082
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: ow-prometheus
+    mem_limit: 512m
+    profiles: ["observability"]
+    ports: ["${PROMETHEUS_PORT:-9090}:9090"]
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    container_name: ow-grafana
+    mem_limit: 384m
+    profiles: ["observability"]
+    ports: ["${GRAFANA_PORT:-3000}:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]
+
+volumes:
+  kafka-data:
+  ingest-cache:
+  analytics-state:

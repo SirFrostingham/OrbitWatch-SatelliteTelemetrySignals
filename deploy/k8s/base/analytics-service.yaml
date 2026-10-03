@@ -1,0 +1,30 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: analytics-service, namespace: orbitwatch, labels: { app: analytics-service } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: analytics-service } }
+  template:
+    metadata:
+      labels: { app: analytics-service }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8083", prometheus.io/path: "/actuator/prometheus" }
+    spec:
+      containers:
+        - name: analytics-service
+          image: orbitwatch/analytics-service:latest
+          ports: [{ containerPort: 8083, name: http }]
+          envFrom: [{ configMapRef: { name: orbitwatch-config } }]
+          env:
+            - { name: PORT, value: "8083" }
+            - { name: KAFKA_STREAMS_STATE_DIR, value: /tmp/streams }
+          readinessProbe: { httpGet: { path: /actuator/health/readiness, port: http }, initialDelaySeconds: 20, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /actuator/health/liveness, port: http }, initialDelaySeconds: 60, periodSeconds: 20 }
+          resources: { requests: { cpu: "500m", memory: "2Gi" }, limits: { memory: "2Gi" } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: analytics-service, namespace: orbitwatch }
+spec:
+  selector: { app: analytics-service }
+  ports: [{ port: 8083, targetPort: http }]

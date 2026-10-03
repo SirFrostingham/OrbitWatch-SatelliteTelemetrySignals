@@ -1,0 +1,7 @@
+**/target
+dashboard/node_modules
+gateway-service/src/main/resources/static
+data/cache
+.git
+docs
+deploy

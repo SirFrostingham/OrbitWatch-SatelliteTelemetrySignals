@@ -1,0 +1,46 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: gateway-service, namespace: orbitwatch, labels: { app: gateway-service } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: gateway-service } }
+  template:
+    metadata:
+      labels: { app: gateway-service }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8080", prometheus.io/path: "/actuator/prometheus" }
+    spec:
+      containers:
+        - name: gateway-service
+          image: orbitwatch/gateway-service:latest
+          ports: [{ containerPort: 8080, name: http }]
+          envFrom: [{ configMapRef: { name: orbitwatch-config } }]
+          env:
+            - { name: PORT, value: "8080" }
+            - { name: PROPAGATION_URL, value: http://propagation-service:8082 }
+          readinessProbe: { httpGet: { path: /actuator/health/readiness, port: http }, initialDelaySeconds: 20, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /actuator/health/liveness, port: http }, initialDelaySeconds: 60, periodSeconds: 20 }
+          resources: { requests: { cpu: "500m", memory: "1Gi" }, limits: { memory: "1Gi" } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: gateway-service, namespace: orbitwatch }
+spec:
+  selector: { app: gateway-service }
+  ports: [{ port: 8080, targetPort: http }]
+---
+# OCI Load Balancer in front of the gateway (OKE provisions a flexible LB from these annotations)
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-public
+  namespace: orbitwatch
+  annotations:
+    oci.oraclecloud.com/load-balancer-type: "lb"
+    service.beta.kubernetes.io/oci-load-balancer-shape: "flexible"
+    service.beta.kubernetes.io/oci-load-balancer-shape-flex-min: "10"
+    service.beta.kubernetes.io/oci-load-balancer-shape-flex-max: "50"
+spec:
+  type: LoadBalancer
+  selector: { app: gateway-service }
+  ports: [{ port: 80, targetPort: http }]

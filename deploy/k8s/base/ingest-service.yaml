@@ -1,0 +1,30 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: ingest-service, namespace: orbitwatch, labels: { app: ingest-service } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: ingest-service } }
+  template:
+    metadata:
+      labels: { app: ingest-service }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8081", prometheus.io/path: "/actuator/prometheus" }
+    spec:
+      containers:
+        - name: ingest-service
+          image: orbitwatch/ingest-service:latest
+          ports: [{ containerPort: 8081, name: http }]
+          envFrom: [{ configMapRef: { name: orbitwatch-config } }]
+          env:
+            - { name: PORT, value: "8081" }
+            - { name: INGEST_CACHE_DIR, value: /data/cache }
+          readinessProbe: { httpGet: { path: /actuator/health/readiness, port: http }, initialDelaySeconds: 20, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /actuator/health/liveness, port: http }, initialDelaySeconds: 60, periodSeconds: 20 }
+          resources: { requests: { cpu: "500m", memory: "1Gi" }, limits: { memory: "1Gi" } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: ingest-service, namespace: orbitwatch }
+spec:
+  selector: { app: ingest-service }
+  ports: [{ port: 8081, targetPort: http }]

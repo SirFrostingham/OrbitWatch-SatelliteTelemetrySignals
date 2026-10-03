@@ -1,0 +1,80 @@
+"""
+OrbitWatch GraphQL API. Queries read the gateway's materialised views; subscriptions stream new
+records as they arrive from Kafka. The same data as the REST API, shaped for clients that want to
+pick fields (e.g. a map that only needs id/lat/lon).
+"""
+type Query {
+  overview: Overview!
+  satellite(noradId: Int!): Satellite
+  satellites(regime: Regime, owner: String, type: String, q: String, sort: SatelliteSort = ALT, limit: Int = 100): [Satellite!]!
+  alerts(type: AlertType, minSeverity: Severity, noradId: Int, limit: Int = 50): [Alert!]!
+  tickStats(last: Int = 60): [TickStats!]!
+}
+
+type Subscription {
+  alertStream(minSeverity: Severity): Alert!
+  tickStatsStream: TickStats!
+}
+
+enum Regime { LEO MEO GEO HEO OTHER }
+enum SatelliteSort { ALT NAME ELEMENT_AGE SPEED NORAD_ID }
+enum AlertType { CONJUNCTION DECAY_WATCH STALE_ELEMENTS NEW_OBJECT MANEUVER_CANDIDATE PROPAGATION_FAILURE }
+enum Severity { INFO WARNING CRITICAL }
+
+type Overview {
+  currentTick: String!
+  trackedObjects: Int!
+  vectorsSeen: Int!
+  latestStats: TickStats
+  alertCounts: [Count!]!
+  serverTime: String!
+}
+
+type Count { key: String!, value: Int! }
+
+type Satellite {
+  noradId: Int!
+  objectName: String
+  objectType: String
+  owner: String
+  regime: String
+  tick: String!
+  elementEpoch: String!
+  elementAgeHours: Float!
+  latDeg: Float!
+  lonDeg: Float!
+  altKm: Float!
+  speedKmS: Float!
+  x: Float!
+  y: Float!
+  z: Float!
+  recentAlerts(limit: Int = 10): [Alert!]!
+}
+
+type Alert {
+  alertId: ID!
+  type: AlertType!
+  severity: Severity!
+  occurredAt: String!
+  primaryNoradId: Int!
+  primaryName: String
+  secondaryNoradId: Int
+  secondaryName: String
+  title: String!
+  details: [Count2!]!
+}
+
+type Count2 { key: String!, value: String! }
+
+type TickStats {
+  tick: String!
+  objectsPropagated: Int!
+  byRegime: [Count!]!
+  byObjectType: [Count!]!
+  byOwnerTop: [Count!]!
+  meanElementAgeHours: Float!
+  staleElementCount: Int!
+  lowPerigeeCount: Int!
+  minAltitudeKm: Float!
+  maxAltitudeKm: Float!
+}

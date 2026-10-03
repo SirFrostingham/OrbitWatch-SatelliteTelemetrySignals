@@ -1,0 +1,61 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21", cache: maven }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: dashboard/package-lock.json }
+      - name: Build dashboard
+        run: cd dashboard && npm ci && npm run build
+      - name: Build + unit/topology tests
+        run: mvn -B verify
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: surefire-reports, path: "**/target/surefire-reports/*.xml" }
+  images:
+    needs: build-test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { service: [ingest-service, propagation-service, analytics-service, gateway-service] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: SERVICE=${{ matrix.service }}
+          tags: orbitwatch/${{ matrix.service }}:${{ github.sha }}
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+  smoke:
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21", cache: maven }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: cd dashboard && npm ci && npm run build && cd .. && mvn -B -DskipTests package
+      - name: Start Kafka
+        run: docker compose up -d kafka && timeout 120 bash -c 'until [ "$(docker inspect -f "{{.State.Health.Status}}" ow-kafka)" = healthy ]; do sleep 3; done'
+      - name: Run services offline and assert the pipeline produces stats + alerts
+        run: |
+          scripts/run-local.sh --offline
+          timeout 240 bash -c 'until curl -sf localhost:8080/api/stats/history?last=1 | grep -q objectsPropagated; do sleep 5; done'
+          curl -sf localhost:8080/api/overview | tee overview.json
+          python3 -c "import json;o=json.load(open('overview.json'));assert o['trackedObjects']>15000,o['trackedObjects'];assert o['latestStats']['objectsPropagated']>15000"
+          curl -sf "localhost:8080/api/alerts?type=CONJUNCTION&limit=5" | python3 -c "import json,sys;a=json.load(sys.stdin);assert len(a)>0,'no conjunctions';print(a[0]['title'])"
+      - name: Logs on failure
+        if: failure()
+        run: tail -n 100 /tmp/orbitwatch/*.log

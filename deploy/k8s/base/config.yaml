@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: orbitwatch-config, namespace: orbitwatch }
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-0.kafka.orbitwatch.svc.cluster.local:9092"
+  KAFKA_SECURITY_PROTOCOL: "PLAINTEXT"
+  PROPAGATION_TICK_MS: "10000"
+  INGEST_SCHEDULE: "PT15M"
+  INGEST_GP_GROUPS: "active"
+  CONJUNCTION_THRESHOLD_KM: "10"
+  JAVA_OPTS: "-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError"
