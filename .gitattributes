@@ -1,0 +1,36 @@
+# Line endings are a CI concern, not a preference.
+#
+# The repository is authored on Windows (Git for Windows defaults to core.autocrlf=true) but CI runs
+# on Linux. A shell script checked out with CRLF fails there with `$'\r': command not found`, which
+# reads like a broken script rather than a line ending. Pin the ending per file type so neither the
+# editor nor a machine's git config decides it.
+#
+# Everything here is LF in the repository AND in the working copy, except the Windows-only scripts:
+# that keeps `git status` clean on every platform and means a file is never rewritten behind you.
+*.sh         text eol=lf
+*.bash       text eol=lf
+Dockerfile   text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.java       text eol=lf
+*.ts         text eol=lf
+*.tsx        text eol=lf
+*.md         text eol=lf
+*.json       text eol=lf
+*.csv        text eol=lf
+*.graphqls   text eol=lf
+*.tf         text eol=lf
+*.py         text eol=lf
+.gitattributes text eol=lf
+.gitignore   text eol=lf
+
+# Windows-only scripts keep CRLF - cmd.exe wants it.
+*.cmd        text eol=crlf
+*.bat        text eol=crlf
+*.ps1        text eol=crlf
+
+# Binary: never touched, never diffed as text.
+*.png        binary
+*.jpg        binary
+*.ico        binary
+*.drawio     text eol=lf

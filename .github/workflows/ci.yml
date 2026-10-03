@@ -51,11 +51,23 @@ jobs:
         run: docker compose up -d kafka && timeout 120 bash -c 'until [ "$(docker inspect -f "{{.State.Health.Status}}" ow-kafka)" = healthy ]; do sleep 3; done'
       - name: Run services offline and assert the pipeline produces stats + alerts
         run: |
-          scripts/run-local.sh --offline
+          # `bash <script>` rather than `./<script>`: the repository is authored on Windows, so the
+          # scripts are committed mode 100644 and running them directly is "Permission denied" (126).
+          bash scripts/run-local.sh --offline
           timeout 240 bash -c 'until curl -sf localhost:8080/api/stats/history?last=1 | grep -q objectsPropagated; do sleep 5; done'
           curl -sf localhost:8080/api/overview | tee overview.json
           python3 -c "import json;o=json.load(open('overview.json'));assert o['trackedObjects']>15000,o['trackedObjects'];assert o['latestStats']['objectsPropagated']>15000"
           curl -sf "localhost:8080/api/alerts?type=CONJUNCTION&limit=5" | python3 -c "import json,sys;a=json.load(sys.stdin);assert len(a)>0,'no conjunctions';print(a[0]['title'])"
+      # Diagnostics must never be the thing that fails: a glob that matches nothing used to exit 1
+      # and hide the real error.
       - name: Logs on failure
         if: failure()
-        run: tail -n 100 /tmp/orbitwatch/*.log
+        run: |
+          echo "== service logs =="
+          tail -n 100 /tmp/orbitwatch/*.log 2>/dev/null || echo "(no service logs - did run-local.sh start?)"
+          echo "== kafka =="
+          docker compose ps || true
+          docker logs --tail 50 ow-kafka 2>&1 || true
+      - name: Stop services
+        if: always()
+        run: bash scripts/stop-local.sh || true
