@@ -54,10 +54,28 @@ jobs:
           # `bash <script>` rather than `./<script>`: the repository is authored on Windows, so the
           # scripts are committed mode 100644 and running them directly is "Permission denied" (126).
           bash scripts/run-local.sh --offline
-          timeout 240 bash -c 'until curl -sf localhost:8080/api/stats/history?last=1 | grep -q objectsPropagated; do sleep 5; done'
+
+          # Wait for each thing being asserted, never for a proxy. Tick statistics are flushed on a
+          # punctuation every tick, but a conjunction alert needs that tick's per-cell windows to
+          # close (grace 5 s) and then pass the deduper, so it lands a tick or two later. Asserting
+          # on conjunctions the moment stats appear is a race: it failed in CI with CONJUNCTION: 0
+          # while the pipeline was perfectly healthy (2026-10-03); measured locally, the first
+          # conjunction arrives ~10 s after the first tick statistics.
+          timeout 240 bash -c 'until curl -sf "localhost:8080/api/stats/history?last=1" | grep -q objectsPropagated; do sleep 5; done' \
+            || { echo "FAIL: no tick statistics after 4 minutes"; exit 1; }
+          timeout 240 bash -c 'until [ "$(curl -sf "localhost:8080/api/alerts?type=CONJUNCTION&limit=1" | python3 -c "import json,sys;print(len(json.load(sys.stdin)))")" != "0" ]; do sleep 5; done' \
+            || { echo "FAIL: no conjunction alerts after 4 minutes"; exit 1; }
+
           curl -sf localhost:8080/api/overview | tee overview.json
-          python3 -c "import json;o=json.load(open('overview.json'));assert o['trackedObjects']>15000,o['trackedObjects'];assert o['latestStats']['objectsPropagated']>15000"
-          curl -sf "localhost:8080/api/alerts?type=CONJUNCTION&limit=5" | python3 -c "import json,sys;a=json.load(sys.stdin);assert len(a)>0,'no conjunctions';print(a[0]['title'])"
+          python3 - <<'PY'
+          import json
+          o = json.load(open('overview.json'))
+          assert o['trackedObjects'] > 15000, o['trackedObjects']
+          assert o['latestStats']['objectsPropagated'] > 15000, o['latestStats']
+          assert o['alertCounts']['CONJUNCTION'] > 0, o['alertCounts']
+          print('tracked:', o['trackedObjects'], 'conjunctions:', o['alertCounts']['CONJUNCTION'])
+          PY
+          curl -sf "localhost:8080/api/alerts?type=CONJUNCTION&limit=5" | python3 -c "import json,sys;print(json.load(sys.stdin)[0]['title'])"
       # Diagnostics must never be the thing that fails: a glob that matches nothing used to exit 1
       # and hide the real error.
       - name: Logs on failure
